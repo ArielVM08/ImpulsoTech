@@ -1,55 +1,67 @@
-import { useState } from "react";
-import Button from "./ui/button";
-import Input from "./ui/input";
-import Label from "./ui/label";
-
-interface LoginFormProps {
-  onSuccess: () => void;
-}
+import { useState } from "react"
+import { supabase } from "../lib/supabase"
+import Button from "./ui/button"
+import Input from "./ui/input"
+import Label from "./ui/label"
 
 interface FormErrors {
-  email?: string;
-  password?: string;
+  email?: string
+  password?: string
+  form?: string
 }
 
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-export default function LoginForm({ onSuccess }: LoginFormProps) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [errors, setErrors] = useState<FormErrors>({});
-  const [loading, setLoading] = useState(false);
+export default function LoginForm() {
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [errors, setErrors] = useState<FormErrors>({})
+  const [loading, setLoading] = useState(false)
 
   const validate = () => {
-    const nextErrors: FormErrors = {};
+    const nextErrors: FormErrors = {}
 
     if (!email.trim()) {
-      nextErrors.email = "Informe seu e-mail.";
+      nextErrors.email = "Informe seu e-mail."
     } else if (!emailPattern.test(email)) {
-      nextErrors.email = "Digite um e-mail válido.";
+      nextErrors.email = "Digite um e-mail válido."
     }
 
     if (!password) {
-      nextErrors.password = "Informe sua senha.";
+      nextErrors.password = "Informe sua senha."
     }
 
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
-  };
+    setErrors(nextErrors)
+    return Object.keys(nextErrors).length === 0
+  }
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
 
-    if (!validate()) return;
+    if (!validate()) return
 
-    setLoading(true);
-    console.log("Login simulado com sucesso para:", email);
-
-    window.setTimeout(() => {
-      setLoading(false);
-      onSuccess();
-    }, 700);
-  };
+    setLoading(true)
+    setErrors((current) => ({ ...current, form: undefined }))
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      })
+      if (error) {
+        setErrors((current) => ({
+          ...current,
+          form: "E-mail ou senha incorretos.",
+        }))
+      }
+    } catch {
+      setErrors((current) => ({
+        ...current,
+        form: "Não foi possível entrar. Verifique sua conexão e tente novamente.",
+      }))
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
@@ -62,15 +74,20 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
           autoComplete="email"
           value={email}
           onChange={(event) => {
-            setEmail(event.target.value);
-            if (errors.email) setErrors((current) => ({ ...current, email: undefined }));
+            setEmail(event.target.value)
+            if (errors.email)
+              setErrors((current) => ({ ...current, email: undefined }))
           }}
           placeholder="voce@email.com"
           aria-invalid={Boolean(errors.email)}
           aria-describedby={errors.email ? "email-error" : undefined}
         />
         {errors.email && (
-          <p id="email-error" className="text-sm font-medium text-error" role="alert">
+          <p
+            id="email-error"
+            className="text-sm font-medium text-error"
+            role="alert"
+          >
             {errors.email}
           </p>
         )}
@@ -94,23 +111,34 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
           autoComplete="current-password"
           value={password}
           onChange={(event) => {
-            setPassword(event.target.value);
-            if (errors.password) setErrors((current) => ({ ...current, password: undefined }));
+            setPassword(event.target.value)
+            if (errors.password)
+              setErrors((current) => ({ ...current, password: undefined }))
           }}
           placeholder="Digite sua senha"
           aria-invalid={Boolean(errors.password)}
           aria-describedby={errors.password ? "password-error" : undefined}
         />
         {errors.password && (
-          <p id="password-error" className="text-sm font-medium text-error" role="alert">
+          <p
+            id="password-error"
+            className="text-sm font-medium text-error"
+            role="alert"
+          >
             {errors.password}
           </p>
         )}
       </div>
 
+      {errors.form && (
+        <p className="text-sm font-medium text-error" role="alert">
+          {errors.form}
+        </p>
+      )}
+
       <Button type="submit" disabled={loading} className="mt-1">
         {loading ? "Entrando..." : "Entrar"}
       </Button>
     </form>
-  );
+  )
 }

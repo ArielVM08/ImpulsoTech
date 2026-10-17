@@ -1,7 +1,7 @@
-import LoginForm from "./LoginForm";
+import LoginForm from "./LoginForm"
 
 interface Props {
-  onLogin: () => void;
+  onCreateAccount: () => void
 }
 
 function Brand() {
@@ -12,10 +12,10 @@ function Brand() {
       </span>
       <span className="text-xl font-semibold tracking-tight">ImpulsoTech</span>
     </div>
-  );
+  )
 }
 
-export default function Login({ onLogin }: Props) {
+export default function Login({ onCreateAccount }: Props) {
   return (
     <main className="grid min-h-screen bg-bg lg:grid-cols-[minmax(28rem,0.92fr)_minmax(32rem,1.08fr)]">
       <section className="relative hidden min-h-screen overflow-hidden bg-panel px-12 py-10 text-panel-text lg:flex lg:flex-col lg:justify-between xl:px-16 xl:py-12">
@@ -35,7 +35,8 @@ export default function Login({ onLogin }: Props) {
             <span className="font-medium text-accent">Cresça.</span>
           </h1>
           <p className="mt-8 max-w-lg text-lg leading-relaxed text-panel-muted">
-            Sua plataforma para planejar a carreira, mapear competências e organizar suas candidaturas.
+            Sua plataforma para planejar a carreira, mapear competências e
+            organizar suas candidaturas.
           </p>
         </div>
 
@@ -66,20 +67,20 @@ export default function Login({ onLogin }: Props) {
             </p>
           </div>
 
-          <LoginForm onSuccess={onLogin} />
+          <LoginForm />
 
           <p className="mt-9 text-center text-sm text-muted">
             Não tem uma conta?{" "}
-            <a
-              href="#"
+            <button
+              type="button"
               className="rounded-sm font-semibold text-accent-dark transition hover:text-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-ring"
-              onClick={(event) => event.preventDefault()}
+              onClick={onCreateAccount}
             >
               Criar conta
-            </a>
+            </button>
           </p>
         </div>
       </section>
     </main>
-  );
+  )
 }
