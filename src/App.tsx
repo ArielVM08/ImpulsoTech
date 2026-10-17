@@ -3,19 +3,20 @@ import type { Session } from "@supabase/supabase-js"
 import { LoaderCircle } from "lucide-react"
 import { supabase } from "./lib/supabase"
 import CreateAccount from "./components/CreateAccount"
+import ForgotPassword from "./components/ForgotPassword"
 import Login from "./components/Login"
 import Onboarding from "./components/Onboarding"
 import Dashboard from "./components/Dashboard"
+import UpdatePassword from "./components/UpdatePassword"
+import {
+  mapProfileToUserProfile,
+  type ProfileRow,
+  type UserProfile,
+} from "./types/profile"
 
-type Screen = "login" | "create-account" | "onboarding" | "dashboard"
+type Screen = "login" | "create-account" | "forgot-password" | "password-recovery" | "onboarding" | "dashboard"
 
-export interface UserProfile {
-  name: string
-  role: string
-  area: string
-  goals: string[]
-  teamSize: string
-}
+export type { UserProfile } from "./types/profile"
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("login")
@@ -26,20 +27,27 @@ export default function App() {
   const [profileError, setProfileError] = useState<string | null>(null)
   const [verificationAttempt, setVerificationAttempt] = useState(0)
   const [logoutError, setLogoutError] = useState<string | null>(null)
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
 
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession)
       setSessionReady(true)
       setProfileError(null)
       setLogoutError(null)
 
+      if (event === "PASSWORD_RECOVERY") {
+        setPasswordRecovery(true)
+        setScreen("password-recovery")
+      }
+
       if (nextSession) {
         setProfileLoading(true)
         setUserProfile(null)
       } else {
+        setPasswordRecovery(false)
         setProfileLoading(false)
         setUserProfile(null)
         setScreen("login")
@@ -82,7 +90,7 @@ export default function App() {
   }, [verificationAttempt])
 
   useEffect(() => {
-    if (!sessionReady || !session?.user.id) return
+    if (!sessionReady || !session?.user.id || passwordRecovery) return
 
     let active = true
     setProfileLoading(true)
@@ -92,7 +100,9 @@ export default function App() {
       try {
         const { data, error } = await supabase
           .from("profiles")
-          .select("nome, role, area, goals, team_size, onboarding_concluido")
+          .select(
+            "id, nome, role, area, goals, team_size, onboarding_concluido, plano_iniciado_em",
+          )
           .eq("id", session.user.id)
           .maybeSingle()
 
@@ -108,21 +118,12 @@ export default function App() {
           return
         }
 
-        if (data.onboarding_concluido !== true) {
+        const profile = data as ProfileRow
+        if (profile.onboarding_concluido !== true) {
           setUserProfile(null)
           setScreen("onboarding")
         } else {
-          setUserProfile({
-            name: typeof data.nome === "string" ? data.nome : "",
-            role: typeof data.role === "string" ? data.role : "",
-            area: typeof data.area === "string" ? data.area : "",
-            goals: Array.isArray(data.goals)
-              ? data.goals.filter(
-                  (goal): goal is string => typeof goal === "string",
-                )
-              : [],
-            teamSize: typeof data.team_size === "string" ? data.team_size : "",
-          })
+          setUserProfile(mapProfileToUserProfile(profile))
           setScreen("dashboard")
         }
         setProfileLoading(false)
@@ -138,7 +139,7 @@ export default function App() {
     return () => {
       active = false
     }
-  }, [session?.user.id, sessionReady, verificationAttempt])
+  }, [session?.user.id, sessionReady, verificationAttempt, passwordRecovery])
 
   const handleLogout = async () => {
     try {
@@ -150,7 +151,7 @@ export default function App() {
     }
   }
 
-  if (!sessionReady || (session && profileLoading)) {
+  if (!sessionReady || (session && profileLoading && !passwordRecovery)) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-bg text-muted">
         <div className="flex items-center gap-3" role="status">
@@ -211,16 +212,68 @@ export default function App() {
         </p>
       )}
       {screen === "login" && (
-        <Login onCreateAccount={() => setScreen("create-account")} />
+        <Login
+          onCreateAccount={() => setScreen("create-account")}
+          onForgotPassword={() => setScreen("forgot-password")}
+        />
       )}
       {screen === "create-account" && (
         <CreateAccount onBackToLogin={() => setScreen("login")} />
       )}
+      {screen === "forgot-password" && (
+        <ForgotPassword onBackToLogin={() => setScreen("login")} />
+      )}
+      {screen === "password-recovery" && session && (
+        <UpdatePassword
+          onContinue={() => {
+            setPasswordRecovery(false)
+            setProfileLoading(true)
+          }}
+        />
+      )}
       {screen === "onboarding" && (
         <Onboarding
-          onComplete={(profile) => {
-            setUserProfile(profile)
+          onComplete={async (profile) => {
+            if (!session?.user.id) {
+              throw new Error(
+                "Sua sessão expirou. Entre novamente para continuar.",
+              )
+            }
+
+            const today = new Date()
+            const planStartedOn = [
+              today.getFullYear(),
+              String(today.getMonth() + 1).padStart(2, "0"),
+              String(today.getDate()).padStart(2, "0"),
+            ].join("-")
+
+            const { data, error } = await supabase
+              .from("profiles")
+              .update({
+                nome: profile.name,
+                role: profile.role,
+                area: profile.area,
+                goals: profile.goals,
+                team_size: profile.teamSize,
+                onboarding_concluido: true,
+                plano_iniciado_em: planStartedOn,
+              })
+              .eq("id", session.user.id)
+              .select(
+                "id, nome, role, area, goals, team_size, onboarding_concluido, plano_iniciado_em",
+              )
+              .single()
+
+            if (error || !data) {
+              throw new Error(
+                "Não foi possível salvar suas respostas. Tente novamente.",
+              )
+            }
+
+            const savedProfile = data as ProfileRow
+            setUserProfile(mapProfileToUserProfile(savedProfile))
             setScreen("dashboard")
+            return savedProfile
           }}
         />
       )}

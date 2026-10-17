@@ -1,5 +1,7 @@
 import { useState } from "react"
+import { Eye, EyeOff } from "lucide-react"
 import { supabase } from "../lib/supabase"
+import { translateAuthError } from "../lib/authErrors"
 import Button from "./ui/button"
 import Input from "./ui/input"
 import Label from "./ui/label"
@@ -10,13 +12,18 @@ interface FormErrors {
   form?: string
 }
 
+interface Props {
+  onForgotPassword: () => void
+}
+
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-export default function LoginForm() {
+export default function LoginForm({ onForgotPassword }: Props) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [errors, setErrors] = useState<FormErrors>({})
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   const validate = () => {
     const nextErrors: FormErrors = {}
@@ -50,7 +57,7 @@ export default function LoginForm() {
       if (error) {
         setErrors((current) => ({
           ...current,
-          form: "E-mail ou senha incorretos.",
+          form: translateAuthError(error.message),
         }))
       }
     } catch {
@@ -96,29 +103,45 @@ export default function LoginForm() {
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-4">
           <Label htmlFor="password">Senha</Label>
-          <a
-            href="#"
+          <button
+            type="button"
             className="rounded-sm text-sm font-medium text-accent-dark transition hover:text-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-ring"
-            onClick={(event) => event.preventDefault()}
+            onClick={onForgotPassword}
           >
             Esqueceu a senha?
-          </a>
+          </button>
         </div>
-        <Input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(event) => {
-            setPassword(event.target.value)
-            if (errors.password)
-              setErrors((current) => ({ ...current, password: undefined }))
-          }}
-          placeholder="Digite sua senha"
-          aria-invalid={Boolean(errors.password)}
-          aria-describedby={errors.password ? "password-error" : undefined}
-        />
+        <div className="relative">
+          <Input
+            id="password"
+            name="password"
+            type={showPassword ? "text" : "password"}
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) => {
+              setPassword(event.target.value)
+              if (errors.password)
+                setErrors((current) => ({ ...current, password: undefined }))
+            }}
+            placeholder="Digite sua senha"
+            className="pr-12"
+            aria-invalid={Boolean(errors.password)}
+            aria-describedby={errors.password ? "password-error" : undefined}
+          />
+          <button
+            type="button"
+            className="absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-r-xl text-muted transition hover:text-text focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-ring"
+            aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+            aria-pressed={showPassword}
+            onClick={() => setShowPassword((visible) => !visible)}
+          >
+            {showPassword ? (
+              <EyeOff className="size-5" aria-hidden="true" />
+            ) : (
+              <Eye className="size-5" aria-hidden="true" />
+            )}
+          </button>
+        </div>
         {errors.password && (
           <p
             id="password-error"

@@ -1,6 +1,8 @@
 import { useState } from "react"
+import { Eye, EyeOff } from "lucide-react"
 
 import { supabase } from "../lib/supabase"
+import { translateAuthError } from "../lib/authErrors"
 
 import Button from "./ui/button"
 
@@ -14,9 +16,8 @@ interface Props {
 
 interface FormErrors {
   email?: string
-
   password?: string
-
+  confirmPassword?: string
   form?: string
 }
 
@@ -37,7 +38,9 @@ export default function CreateAccount({ onBackToLogin }: Props) {
   const [email, setEmail] = useState("")
 
   const [password, setPassword] = useState("")
-
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [errors, setErrors] = useState<FormErrors>({})
 
   const [loading, setLoading] = useState(false)
@@ -58,6 +61,9 @@ export default function CreateAccount({ onBackToLogin }: Props) {
     if (password.length < 8) {
       nextErrors.password = "A senha deve ter pelo menos 8 caracteres."
     }
+    if (password !== confirmPassword) {
+      nextErrors.confirmPassword = "As senhas não coincidem."
+    }
 
     setErrors(nextErrors)
 
@@ -74,7 +80,7 @@ export default function CreateAccount({ onBackToLogin }: Props) {
 
       if (error) {
         setErrors({
-          form: "Não foi possível criar sua conta. Verifique os dados e tente novamente.",
+          form: translateAuthError(error.message),
         })
 
         return
@@ -181,26 +187,44 @@ export default function CreateAccount({ onBackToLogin }: Props) {
               </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="signup-password">Senha</Label>
-                <Input
-                  id="signup-password"
-                  name="password"
-                  type="password"
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(event) => {
-                    setPassword(event.target.value)
-
-                    setErrors((current) => ({
-                      ...current,
-                      password: undefined,
-                    }))
-                  }}
-                  placeholder="Mínimo de 8 caracteres"
-                  aria-invalid={Boolean(errors.password)}
-                  aria-describedby={
-                    errors.password ? "signup-password-error" : undefined
-                  }
-                />
+                <div className="relative">
+                  <Input
+                    id="signup-password"
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(event) => {
+                      setPassword(event.target.value)
+                      setErrors((current) => ({
+                        ...current,
+                        password: undefined,
+                        confirmPassword: undefined,
+                      }))
+                    }}
+                    placeholder="Mínimo de 8 caracteres"
+                    className="pr-12"
+                    aria-invalid={Boolean(errors.password)}
+                    aria-describedby={
+                      errors.password ? "signup-password-error" : undefined
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-r-xl text-muted transition hover:text-text focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-ring"
+                    aria-label={
+                      showPassword ? "Ocultar senha" : "Mostrar senha"
+                    }
+                    aria-pressed={showPassword}
+                    onClick={() => setShowPassword((visible) => !visible)}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="size-5" aria-hidden="true" />
+                    ) : (
+                      <Eye className="size-5" aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
                 {errors.password && (
                   <p
                     id="signup-password-error"
@@ -208,6 +232,59 @@ export default function CreateAccount({ onBackToLogin }: Props) {
                     role="alert"
                   >
                     {errors.password}
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="signup-confirm-password">Confirmar senha</Label>
+                <div className="relative">
+                  <Input
+                    id="signup-confirm-password"
+                    name="confirmPassword"
+                    type={showConfirmPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(event) => {
+                      setConfirmPassword(event.target.value)
+                      setErrors((current) => ({
+                        ...current,
+                        confirmPassword: undefined,
+                      }))
+                    }}
+                    placeholder="Digite sua senha novamente"
+                    className="pr-12"
+                    aria-invalid={Boolean(errors.confirmPassword)}
+                    aria-describedby={
+                      errors.confirmPassword
+                        ? "signup-confirm-password-error"
+                        : undefined
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-r-xl text-muted transition hover:text-text focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-ring"
+                    aria-label={
+                      showConfirmPassword ? "Ocultar senha" : "Mostrar senha"
+                    }
+                    aria-pressed={showConfirmPassword}
+                    onClick={() =>
+                      setShowConfirmPassword((visible) => !visible)
+                    }
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="size-5" aria-hidden="true" />
+                    ) : (
+                      <Eye className="size-5" aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
+                {errors.confirmPassword && (
+                  <p
+                    id="signup-confirm-password-error"
+                    className="text-sm font-medium text-error"
+                    role="alert"
+                  >
+                    {errors.confirmPassword}
                   </p>
                 )}
               </div>

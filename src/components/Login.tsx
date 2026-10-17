@@ -2,6 +2,7 @@ import LoginForm from "./LoginForm"
 
 interface Props {
   onCreateAccount: () => void
+  onForgotPassword: () => void
 }
 
 function Brand() {
@@ -15,7 +16,7 @@ function Brand() {
   )
 }
 
-export default function Login({ onCreateAccount }: Props) {
+export default function Login({ onCreateAccount, onForgotPassword }: Props) {
   return (
     <main className="grid min-h-screen bg-bg lg:grid-cols-[minmax(28rem,0.92fr)_minmax(32rem,1.08fr)]">
       <section className="relative hidden min-h-screen overflow-hidden bg-panel px-12 py-10 text-panel-text lg:flex lg:flex-col lg:justify-between xl:px-16 xl:py-12">
@@ -67,7 +68,7 @@ export default function Login({ onCreateAccount }: Props) {
             </p>
           </div>
 
-          <LoginForm />
+          <LoginForm onForgotPassword={onForgotPassword} />
 
           <p className="mt-9 text-center text-sm text-muted">
             Não tem uma conta?{" "}
