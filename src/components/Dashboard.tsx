@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   CircleDot,
@@ -14,7 +14,17 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { UserProfile } from "../App";
-import type { Competencia, Meta } from "../types/pdi";
+import { supabase } from "../lib/supabase";
+import {
+  competenciaFromDatabase,
+  categoriaMetaToDatabase,
+  metaFromDatabase,
+  tipoCompetenciaToDatabase,
+  type Competencia,
+  type CompetenciaRow,
+  type Meta,
+  type MetaRow,
+} from "../types/pdi";
 import CompetenciaDialog from "./CompetenciaDialog";
 import CompetenciaItem from "./CompetenciaItem";
 import MetaCard from "./MetaCard";
@@ -32,10 +42,55 @@ export default function Dashboard({ userProfile, onLogout }: Props) {
   const [activePage, setActivePage] = useState<"pdi" | "planejamento">("pdi");
   const [goals, setGoals] = useState<Meta[]>([]);
   const [skills, setSkills] = useState<Competencia[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState<Meta | null>(null);
   const [skillDialogOpen, setSkillDialogOpen] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<Competencia | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setLoadError(null);
+
+    void (async () => {
+      try {
+        const [goalsResult, skillsResult] = await Promise.all([
+          supabase
+            .from("metas")
+            .select("id, titulo, descricao, categoria, prazo, progresso, status")
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("competencias")
+            .select("id, nome, tipo, nivel")
+            .order("created_at", { ascending: true }),
+        ]);
+
+        if (!active) return;
+        if (goalsResult.error || skillsResult.error) {
+          setLoadError("Não foi possível carregar suas metas e competências. Tente novamente.");
+          setLoading(false);
+          return;
+        }
+
+        setGoals((goalsResult.data as MetaRow[]).map(metaFromDatabase));
+        setSkills((skillsResult.data as CompetenciaRow[]).map(competenciaFromDatabase));
+        setLoading(false);
+      } catch {
+        if (!active) return;
+        setLoadError("Não foi possível carregar suas metas e competências. Tente novamente.");
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [loadAttempt]);
 
   const activeGoals = goals.filter((goal) => goal.status !== "Concluída").length;
   const completedGoals = goals.filter((goal) => goal.status === "Concluída").length;
@@ -51,75 +106,175 @@ export default function Dashboard({ userProfile, onLogout }: Props) {
   );
 
   const openNewGoal = () => {
+    setOperationError(null);
     setSelectedGoal(null);
     setDialogOpen(true);
   };
 
   const openGoal = (goal: Meta) => {
+    setOperationError(null);
     setSelectedGoal(goal);
     setDialogOpen(true);
   };
 
-  const saveGoal = (data: Omit<Meta, "id" | "status">) => {
-    const status: Meta["status"] =
-      data.progresso === 0
-        ? "Não iniciada"
-        : data.progresso === 100
-          ? "Concluída"
-          : "Em andamento";
+  const saveGoal = async (data: Omit<Meta, "id" | "status">): Promise<boolean> => {
+    setSaving(true);
+    setOperationError(null);
+    const values = {
+      titulo: data.titulo,
+      descricao: data.descricao,
+      categoria: categoriaMetaToDatabase(data.categoria),
+      prazo: data.prazo,
+      progresso: data.progresso,
+    };
 
-    if (selectedGoal) {
+    try {
+      const result = selectedGoal
+        ? await supabase
+            .from("metas")
+            .update(values)
+            .eq("id", selectedGoal.id)
+            .select("id, titulo, descricao, categoria, prazo, progresso, status")
+            .single()
+        : await supabase
+            .from("metas")
+            .insert(values)
+            .select("id, titulo, descricao, categoria, prazo, progresso, status")
+            .single();
+
+      if (result.error || !result.data) {
+        setOperationError("Não foi possível salvar a meta. Tente novamente.");
+        return false;
+      }
+
+      const savedGoal = metaFromDatabase(result.data as MetaRow);
       setGoals((current) =>
-        current.map((goal) =>
-          goal.id === selectedGoal.id ? { ...goal, ...data, status } : goal,
-        ),
+        selectedGoal
+          ? current.map((goal) => (goal.id === savedGoal.id ? savedGoal : goal))
+          : [...current, savedGoal],
       );
-      return;
+      return true;
+    } catch {
+      setOperationError("Não foi possível salvar a meta. Tente novamente.");
+      return false;
+    } finally {
+      setSaving(false);
     }
+  };
 
-    setGoals((current) => [
-      ...current,
-      {
-        ...data,
-        id: `meta-${Date.now()}`,
-        status,
-      },
-    ]);
+  const deleteGoal = async (): Promise<boolean> => {
+    if (!selectedGoal) return false;
+    setSaving(true);
+    setOperationError(null);
+
+    try {
+      const { data, error } = await supabase
+        .from("metas")
+        .delete()
+        .eq("id", selectedGoal.id)
+        .select("id")
+        .maybeSingle();
+      if (error || !data) {
+        setOperationError("Não foi possível remover a meta. Tente novamente.");
+        return false;
+      }
+
+      setGoals((current) => current.filter((goal) => goal.id !== selectedGoal.id));
+      setSelectedGoal(null);
+      return true;
+    } catch {
+      setOperationError("Não foi possível remover a meta. Tente novamente.");
+      return false;
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openNewSkill = () => {
+    setOperationError(null);
     setSelectedSkill(null);
     setSkillDialogOpen(true);
   };
 
   const openSkill = (skill: Competencia) => {
+    setOperationError(null);
     setSelectedSkill(skill);
     setSkillDialogOpen(true);
   };
 
-  const saveSkill = (data: Omit<Competencia, "id">) => {
-    if (selectedSkill) {
-      setSkills((current) =>
-        current.map((skill) =>
-          skill.id === selectedSkill.id ? { ...skill, ...data } : skill,
-        ),
-      );
-      return;
-    }
+  const saveSkill = async (data: Omit<Competencia, "id">): Promise<boolean> => {
+    setSaving(true);
+    setOperationError(null);
+    const values = {
+      nome: data.nome,
+      tipo: tipoCompetenciaToDatabase(data.tipo),
+      nivel: data.nivel,
+    };
 
-    setSkills((current) => [
-      ...current,
-      {
-        ...data,
-        id: `skill-${Date.now()}`,
-      },
-    ]);
+    try {
+      const result = selectedSkill
+        ? await supabase
+            .from("competencias")
+            .update(values)
+            .eq("id", selectedSkill.id)
+            .select("id, nome, tipo, nivel")
+            .single()
+        : await supabase
+            .from("competencias")
+            .insert(values)
+            .select("id, nome, tipo, nivel")
+            .single();
+
+      if (result.error || !result.data) {
+        setOperationError(
+          result.error?.code === "23505"
+            ? "Você já tem uma competência com esse nome"
+            : "Não foi possível salvar a competência. Tente novamente.",
+        );
+        return false;
+      }
+
+      const savedSkill = competenciaFromDatabase(result.data as CompetenciaRow);
+      setSkills((current) =>
+        selectedSkill
+          ? current.map((skill) => (skill.id === savedSkill.id ? savedSkill : skill))
+          : [...current, savedSkill],
+      );
+      return true;
+    } catch {
+      setOperationError("Não foi possível salvar a competência. Tente novamente.");
+      return false;
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const deleteSkill = () => {
-    if (!selectedSkill) return;
-    setSkills((current) => current.filter((skill) => skill.id !== selectedSkill.id));
-    setSelectedSkill(null);
+  const deleteSkill = async (): Promise<boolean> => {
+    if (!selectedSkill) return false;
+    setSaving(true);
+    setOperationError(null);
+
+    try {
+      const { data, error } = await supabase
+        .from("competencias")
+        .delete()
+        .eq("id", selectedSkill.id)
+        .select("id")
+        .maybeSingle();
+      if (error || !data) {
+        setOperationError("Não foi possível remover a competência. Tente novamente.");
+        return false;
+      }
+
+      setSkills((current) => current.filter((skill) => skill.id !== selectedSkill.id));
+      setSelectedSkill(null);
+      return true;
+    } catch {
+      setOperationError("Não foi possível remover a competência. Tente novamente.");
+      return false;
+    } finally {
+      setSaving(false);
+    }
   };
 
   const summary = [
@@ -165,12 +320,42 @@ export default function Dashboard({ userProfile, onLogout }: Props) {
               Defina suas metas e acompanhe sua evolução
             </p>
           </div>
-          <Button type="button" className="w-full sm:w-auto" onClick={openNewGoal}>
+          <Button type="button" className="w-full sm:w-auto" onClick={openNewGoal} disabled={loading}>
             <Plus className="size-5" aria-hidden="true" />
             Nova meta
           </Button>
         </header>
 
+        {operationError && (
+          <p
+            className="fixed left-1/2 top-4 z-[60] -translate-x-1/2 rounded-lg bg-error px-4 py-3 text-sm font-medium text-white shadow-lg"
+            role="alert"
+          >
+            {operationError}
+          </p>
+        )}
+
+        {loading && (
+          <p className="mt-8 flex items-center justify-center gap-3 rounded-2xl border border-border bg-surface px-6 py-8 text-muted" role="status">
+            <span className="size-5 animate-spin rounded-full border-2 border-accent border-r-transparent" aria-hidden="true" />
+            Carregando suas metas e competências...
+          </p>
+        )}
+        {!loading && loadError && (
+          <div className="mt-8 rounded-2xl border border-error/30 bg-surface px-6 py-8 text-center">
+            <p className="text-sm text-error" role="alert">{loadError}</p>
+            <Button
+              type="button"
+              className="mt-4 sm:w-auto"
+              onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+            >
+              Tentar novamente
+            </Button>
+          </div>
+        )}
+
+        {!loading && !loadError && (
+        <>
         <section className="mt-8 grid gap-4 sm:grid-cols-3" aria-label="Resumo do PDI">
           {summary.map(({ label, value, helper, icon: Icon, iconStyle }) => (
             <article
@@ -328,13 +513,17 @@ export default function Dashboard({ userProfile, onLogout }: Props) {
             </div>
           )}
         </section>
-      </div>
+        </>
+        )}
 
+      </div>
       <NovaMetaDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         meta={selectedGoal}
         onSave={saveGoal}
+        onDelete={deleteGoal}
+        isSaving={saving}
       />
       <CompetenciaDialog
         open={skillDialogOpen}
@@ -342,6 +531,7 @@ export default function Dashboard({ userProfile, onLogout }: Props) {
         competencia={selectedSkill}
         onSave={saveSkill}
         onDelete={deleteSkill}
+        isSaving={saving}
       />
       </>
       )}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { X } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import type { CategoriaMeta, Meta } from "../types/pdi";
 import Button from "./ui/button";
 import Input from "./ui/input";
@@ -12,7 +12,9 @@ interface NovaMetaDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   meta?: Meta | null;
-  onSave: (meta: Omit<Meta, "id" | "status">) => void;
+  onSave: (meta: Omit<Meta, "id" | "status">) => Promise<boolean>;
+  onDelete: () => Promise<boolean>;
+  isSaving: boolean;
 }
 
 const emptyForm = {
@@ -28,6 +30,8 @@ export default function NovaMetaDialog({
   onOpenChange,
   meta,
   onSave,
+  onDelete,
+  isSaving,
 }: NovaMetaDialogProps) {
   const [form, setForm] = useState(emptyForm);
 
@@ -46,10 +50,13 @@ export default function NovaMetaDialog({
     );
   }, [meta, open]);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    onSave(form);
-    onOpenChange(false);
+    if (await onSave(form)) onOpenChange(false);
+  };
+
+  const handleDelete = async () => {
+    if (await onDelete()) onOpenChange(false);
   };
 
   return (
@@ -151,15 +158,31 @@ export default function NovaMetaDialog({
               </div>
             )}
 
-            <div className="mt-2 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <div className="mt-2 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+              {meta ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-error sm:w-auto"
+                  onClick={handleDelete}
+                  disabled={isSaving}
+                >
+                  <Trash2 className="size-4" aria-hidden="true" />
+                  Remover
+                </Button>
+              ) : (
+                <span />
+              )}
+              <div className="flex flex-col-reverse gap-3 sm:flex-row">
               <Dialog.Close asChild>
-                <Button type="button" variant="secondary" className="sm:w-auto">
+                <Button type="button" variant="secondary" className="sm:w-auto" disabled={isSaving}>
                   Cancelar
                 </Button>
               </Dialog.Close>
-              <Button type="submit" className="sm:w-auto">
-                {meta ? "Salvar alterações" : "Criar meta"}
+              <Button type="submit" className="sm:w-auto" disabled={isSaving}>
+                {isSaving ? "Salvando..." : meta ? "Salvar alterações" : "Criar meta"}
               </Button>
+              </div>
             </div>
           </form>
         </Dialog.Content>

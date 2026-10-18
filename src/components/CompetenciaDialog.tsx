@@ -17,8 +17,9 @@ interface CompetenciaDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   competencia?: Competencia | null;
-  onSave: (data: CompetenciaFormData) => void;
-  onDelete: () => void;
+  onSave: (data: CompetenciaFormData) => Promise<boolean>;
+  onDelete: () => Promise<boolean>;
+  isSaving: boolean;
 }
 
 const emptyForm: CompetenciaFormData = {
@@ -33,6 +34,7 @@ export default function CompetenciaDialog({
   competencia,
   onSave,
   onDelete,
+  isSaving,
 }: CompetenciaDialogProps) {
   const [form, setForm] = useState<CompetenciaFormData>(emptyForm);
 
@@ -49,15 +51,13 @@ export default function CompetenciaDialog({
     );
   }, [competencia, open]);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    onSave(form);
-    onOpenChange(false);
+    if (await onSave(form)) onOpenChange(false);
   };
 
-  const handleDelete = () => {
-    onDelete();
-    onOpenChange(false);
+  const handleDelete = async () => {
+    if (await onDelete()) onOpenChange(false);
   };
 
   return (
@@ -139,6 +139,7 @@ export default function CompetenciaDialog({
                   variant="ghost"
                   className="text-error sm:w-auto"
                   onClick={handleDelete}
+                  disabled={isSaving}
                 >
                   <Trash2 className="size-4" aria-hidden="true" />
                   Remover
@@ -148,12 +149,16 @@ export default function CompetenciaDialog({
               )}
               <div className="flex flex-col-reverse gap-3 sm:flex-row">
                 <Dialog.Close asChild>
-                  <Button type="button" variant="secondary" className="sm:w-auto">
+                  <Button type="button" variant="secondary" className="sm:w-auto" disabled={isSaving}>
                     Cancelar
                   </Button>
                 </Dialog.Close>
-                <Button type="submit" className="sm:w-auto">
-                  {competencia ? "Salvar alterações" : "Adicionar competência"}
+                <Button type="submit" className="sm:w-auto" disabled={isSaving}>
+                  {isSaving
+                    ? "Salvando..."
+                    : competencia
+                      ? "Salvar alterações"
+                      : "Adicionar competência"}
                 </Button>
               </div>
             </div>
