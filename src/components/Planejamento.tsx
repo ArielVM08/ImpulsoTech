@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   BookOpenCheck,
@@ -15,6 +15,7 @@ import {
   Target,
 } from "lucide-react";
 import type { UserProfile } from "../App";
+import { supabase } from "../lib/supabase";
 import Button from "./ui/button";
 
 interface Props {
@@ -36,6 +37,19 @@ const weekDays = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
 const dateKey = (date: Date) =>
   `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+
+function formatLocalDate(date: Date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function parseLocalDate(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
 
 const areaNames: Record<string, string> = {
   tecnologia: "Tecnologia",
@@ -103,19 +117,117 @@ const goalTips: Record<string, string> = {
 export default function Planejamento({ userProfile }: Props) {
   const plan = areaPlans[userProfile.area] ?? areaPlans.gestao;
   const [completed, setCompleted] = useState<string[]>([]);
+  const [planStartDate, setPlanStartDate] = useState<Date | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const [pendingItems, setPendingItems] = useState<string[]>([]);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const today = useMemo(() => new Date(), []);
   const scheduledItems = useMemo<ScheduledItem[]>(
-    () =>
-      plan.map((item, index) => {
-        const date = new Date(today);
-        date.setDate(today.getDate() + [3, 14, 90][index]);
-        return { ...item, date };
-      }),
-    [plan, today],
+    () => planStartDate
+      ? plan.map((item, index) => {
+          const date = new Date(
+            planStartDate.getFullYear(),
+            planStartDate.getMonth(),
+            planStartDate.getDate(),
+          );
+          date.setDate(date.getDate() + [3, 14, 90][index]);
+          return { ...item, date };
+        })
+      : [],
+    [plan, planStartDate],
   );
   const [viewDate, setViewDate] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
-  const [selectedDate, setSelectedDate] = useState(() => dateKey(scheduledItems[0].date));
+  const [selectedDate, setSelectedDate] = useState("");
   const isSmallBusiness = userProfile.role === "pequeno-negocio";
+
+  useEffect(() => {
+    let active = true;
+    setLoaded(false);
+    setLoadError(null);
+
+    void (async () => {
+      try {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError || !user) {
+          throw new Error("Não foi possível identificar sua conta.");
+        }
+
+        const [profileResult, completedResult] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("plano_iniciado_em")
+            .eq("id", user.id)
+            .single(),
+          supabase.from("plano_etapas").select("etapa_id"),
+        ]);
+
+        if (profileResult.error || completedResult.error || !profileResult.data) {
+          throw new Error("Não foi possível carregar seu planejamento.");
+        }
+
+        let startDateString = profileResult.data.plano_iniciado_em;
+        if (!startDateString) {
+          const todayString = formatLocalDate(new Date());
+          const { data, error } = await supabase
+            .from("profiles")
+            .update({ plano_iniciado_em: todayString })
+            .eq("id", user.id)
+            .is("plano_iniciado_em", null)
+            .select("plano_iniciado_em")
+            .maybeSingle();
+
+          if (error) {
+            throw new Error("Não foi possível registrar o início do planejamento.");
+          }
+
+          if (data?.plano_iniciado_em) {
+            startDateString = data.plano_iniciado_em;
+          } else {
+            const { data: currentProfile, error: reloadError } = await supabase
+              .from("profiles")
+              .select("plano_iniciado_em")
+              .eq("id", user.id)
+              .single();
+            if (reloadError || !currentProfile?.plano_iniciado_em) {
+              throw new Error("Não foi possível carregar a data de início do planejamento.");
+            }
+            startDateString = currentProfile.plano_iniciado_em;
+          }
+        }
+
+        if (!active) return;
+        const startDate = parseLocalDate(startDateString);
+        const firstScheduledDate = new Date(
+          startDate.getFullYear(),
+          startDate.getMonth(),
+          startDate.getDate() + 3,
+        );
+        const planIds = new Set(plan.map((item) => item.id));
+        setPlanStartDate(startDate);
+        setCompleted(
+          completedResult.data
+            .map((row) => row.etapa_id)
+            .filter((id) => planIds.has(id)),
+        );
+        setSelectedDate(dateKey(firstScheduledDate));
+        setViewDate(new Date(firstScheduledDate.getFullYear(), firstScheduledDate.getMonth(), 1));
+        setLoaded(true);
+      } catch {
+        if (!active) return;
+        setLoadError("Não foi possível carregar seu planejamento. Tente novamente.");
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [loadAttempt]);
 
   const progress = Math.round((completed.length / plan.length) * 100);
   const tips = useMemo(
@@ -123,10 +235,41 @@ export default function Planejamento({ userProfile }: Props) {
     [userProfile.goals],
   );
 
-  const toggleItem = (id: string) => {
-    setCompleted((current) =>
-      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
-    );
+  const toggleItem = async (id: string) => {
+    if (pendingItems.includes(id)) return;
+    setPendingItems((current) => [...current, id]);
+    setOperationError(null);
+
+    try {
+      if (completed.includes(id)) {
+        const { data, error } = await supabase
+          .from("plano_etapas")
+          .delete()
+          .eq("etapa_id", id)
+          .select("etapa_id")
+          .maybeSingle();
+        if (error || !data) {
+          setOperationError("Não foi possível atualizar a etapa. Tente novamente.");
+          return;
+        }
+        setCompleted((current) => current.filter((item) => item !== id));
+      } else {
+        const { data, error } = await supabase
+          .from("plano_etapas")
+          .insert({ etapa_id: id })
+          .select("etapa_id")
+          .single();
+        if (error || !data) {
+          setOperationError("Não foi possível atualizar a etapa. Tente novamente.");
+          return;
+        }
+        setCompleted((current) => [...current, data.etapa_id]);
+      }
+    } catch {
+      setOperationError("Não foi possível atualizar a etapa. Tente novamente.");
+    } finally {
+      setPendingItems((current) => current.filter((item) => item !== id));
+    }
   };
 
   const firstDay = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getDay();
@@ -151,6 +294,32 @@ export default function Planejamento({ userProfile }: Props) {
     setViewDate(new Date(item.date.getFullYear(), item.date.getMonth(), 1));
     setSelectedDate(dateKey(item.date));
   };
+
+  if (!loaded) {
+    return (
+      <div id="planejamento" className="mx-auto max-w-screen-2xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10 xl:px-12">
+        <div className="rounded-2xl border border-border bg-surface px-6 py-10 text-center">
+          {loadError ? (
+            <>
+              <p className="text-sm text-error" role="alert">{loadError}</p>
+              <Button
+                type="button"
+                className="mt-4 sm:w-auto"
+                onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+              >
+                Tentar novamente
+              </Button>
+            </>
+          ) : (
+            <p className="flex items-center justify-center gap-3 text-muted" role="status">
+              <span className="size-5 animate-spin rounded-full border-2 border-accent border-r-transparent" aria-hidden="true" />
+              Carregando seu planejamento...
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div id="planejamento" className="mx-auto max-w-screen-2xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10 xl:px-12">
@@ -181,6 +350,12 @@ export default function Planejamento({ userProfile }: Props) {
           </div>
         </div>
       </header>
+
+      {operationError && (
+        <p className="mt-5 rounded-xl border border-error/30 bg-surface px-4 py-3 text-sm text-error" role="alert">
+          {operationError}
+        </p>
+      )}
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.65fr)]">
         <section aria-labelledby="roadmap-title">
@@ -214,6 +389,7 @@ export default function Planejamento({ userProfile }: Props) {
                           : "border-border bg-bg text-muted"
                       }`}
                       onClick={() => toggleItem(item.id)}
+                      disabled={pendingItems.includes(item.id)}
                       aria-label={isDone ? `Marcar ${item.title} como pendente` : `Concluir ${item.title}`}
                     >
                       {isDone ? <Check className="size-5" aria-hidden="true" /> : <Circle className="size-5" aria-hidden="true" />}
@@ -414,6 +590,7 @@ export default function Planejamento({ userProfile }: Props) {
                       variant="secondary"
                       className="mt-4 h-10"
                       onClick={() => toggleItem(item.id)}
+                      disabled={pendingItems.includes(item.id)}
                     >
                       {completed.includes(item.id) ? (
                         <>
